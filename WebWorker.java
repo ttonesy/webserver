@@ -32,6 +32,11 @@ public class WebWorker implements Runnable
 
 private Socket socket;
 
+private String firstLine = null;
+private String filePath = null;
+private boolean errorReadingFile = false;
+
+
 /**
 * Constructor: must have a valid open socket
 **/
@@ -53,6 +58,12 @@ public void run()
       InputStream  is = socket.getInputStream();
       OutputStream os = socket.getOutputStream();
       readHTTPRequest(is);
+      
+      /*
+       * Changees: Added checkFile function that will return true
+       * if there is an error reading the file
+       */
+      checkFile();
       writeHTTPHeader(os,"text/html");
       writeContent(os);
       os.flush();
@@ -64,6 +75,25 @@ public void run()
    return;
 }
 
+/*
+ * Changes: This function will try to read the file
+ * frm the file path and return true if there is an error
+ */
+private void checkFile()
+{
+   File file = new File("." + filePath);
+
+   try {
+      BufferedReader br = new BufferedReader(new FileReader(file));
+      br.close(); 
+   } catch (IOException e) {
+      errorReadingFile = true;
+      System.err.println("Error opening file.");
+   }
+
+}
+
+
 /**
 * Read the HTTP request header.
 **/
@@ -71,10 +101,21 @@ private void readHTTPRequest(InputStream is)
 {
    String line;
    BufferedReader r = new BufferedReader(new InputStreamReader(is));
-   while (true) {
+   while (true) 
+   {
       try {
          while (!r.ready()) Thread.sleep(1);
          line = r.readLine();
+
+         /*
+          * Changes: Store the first request line in firstLine
+          * file path will be here
+          */
+         if (firstLine == null)
+         {
+            firstLine = line;
+         }
+
          System.err.println("Request line: ("+line+")");
          if (line.length()==0) break;
       } catch (Exception e) {
@@ -82,6 +123,19 @@ private void readHTTPRequest(InputStream is)
          break;
       }
    }
+
+   /*
+    * Changes: Extract the file path from the GET request
+    */
+   if (firstLine != null) {
+      String[] parts = firstLine.split(" ");
+      if (parts.length >= 2) {
+         filePath = parts[1]; // Extract the path part of the request
+      }
+   }
+
+   System.err.println("Requested file path: " + filePath);
+
    return;
 }
 
@@ -95,7 +149,19 @@ private void writeHTTPHeader(OutputStream os, String contentType) throws Excepti
    Date d = new Date();
    DateFormat df = DateFormat.getDateTimeInstance();
    df.setTimeZone(TimeZone.getTimeZone("GMT"));
-   os.write("HTTP/1.1 200 OK\n".getBytes());
+
+   /*
+    * Changes: Check if there was an error reading the file
+    * Serve a 404 NOT FOUND error if so
+    */
+    if (errorReadingFile == false)
+    {
+      os.write("HTTP/1.1 200 OK\n".getBytes());
+    }
+    else
+    {
+      os.write("HTTP/1.1 404 NOT FOUND\n".getBytes());
+    }
    os.write("Date: ".getBytes());
    os.write((df.format(d)).getBytes());
    os.write("\n".getBytes());
@@ -116,9 +182,52 @@ private void writeHTTPHeader(OutputStream os, String contentType) throws Excepti
 **/
 private void writeContent(OutputStream os) throws Exception
 {
-   os.write("<html><head></head><body>\n".getBytes());
-   os.write("<h3>My web server works!</h3>\n".getBytes());
-   os.write("</body></html>\n".getBytes());
+    /*
+     * Changelog: Serve HTML file to localhost
+     */
+    File file = new File("." + filePath);
+    
+    System.err.println("Checking file at: " + file.getAbsolutePath());
+    
+    if (errorReadingFile == false)
+    {
+      BufferedReader br = new BufferedReader(new FileReader(file));
+      String currLine;
+
+      while ((currLine = br.readLine()) != null)
+      {
+         if (currLine.contains("{{cs371date}}"))
+         {
+            Date d = new Date();
+            DateFormat df = DateFormat.getDateTimeInstance();
+            df.setTimeZone(TimeZone.getTimeZone("GMT"));
+            currLine = currLine.replace("{{cs371date}}", "Date: " + df.format(d));
+         }
+
+         if (currLine.contains("{{cs371server}}"))
+         {
+            currLine = currLine.replace("{{cs371server}}", "CS371 SERVER");
+         }
+
+         os.write(currLine.getBytes());
+         os.write("\n".getBytes());
+
+      }
+
+      br.close();
+    }
+
+    else
+    {
+      /*
+       * error stuff here
+       */
+      os.write("<html><head></head><body>\n".getBytes());
+      os.write("<h3>404 NOT FOUND</h3>\n".getBytes());
+      os.write("</body></html>\n".getBytes());
+    }
+
 }
+
 
 } // end class
